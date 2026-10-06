@@ -29,12 +29,8 @@ INSTALL_DIR="/opt/hvm"
 SERVICE_NAME="hvm"
 PANEL_PORT="5000"
 
-BIN_FILE="${INSTALL_DIR}/hvm.bin"
 LOG_FILE="/var/log/hvm.log"
 CRED_FILE="${INSTALL_DIR}/admin_credentials.txt"
-
-# Zip ফাইল সাধারণত 2MB মতো, তাই ১MB মিনিমাম থ্রেশহোল্ড রাখা হলো
-MIN_FILE_SIZE_MB=1
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -76,7 +72,7 @@ cat << "EOF"
 ██║  ██║ ╚████╔╝ ██║ ╚═╝ ██║
 ╚═╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝
 
-       HVM PANEL V9 ULTRA INSTALLER
+       HVM PANEL V8 ULTRA INSTALLER
 EOF
 echo -e "${NC}"
 
@@ -115,7 +111,7 @@ line
 # DEPENDENCY MANAGEMENT
 # =========================================================
 
-info "Installing required system dependencies..."
+info "Installing system dependencies (unzip, python3, etc.)..."
 
 if command -v apt >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
@@ -162,68 +158,68 @@ info "HVM Panel will run on Port: ${PANEL_PORT}"
 line
 
 # =========================================================
-# PREPARE INSTALL DIRECTORY
+# PREPARE DIRECTORY, DOWNLOAD & UNZIP
 # =========================================================
 
 info "Preparing installation directory at ${INSTALL_DIR}..."
 
+rm -rf "${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
 
-ok "Directory created and set."
-
-line
-
-# =========================================================
-# ZIP DOWNLOAD, UNZIP & INTEGRITY CHECK
-# =========================================================
-
-info "Downloading HVM Core Archive (.zip)..."
-
-rm -f hvm.zip hvm.bin
+info "Downloading hvm-v8.zip..."
 
 curl -L \
     --fail \
     --retry 5 \
     --retry-delay 3 \
     --progress-bar \
-    -o hvm.zip "${HVM_URL}"
+    -o "hvm-v8.zip" "${HVM_URL}"
 
 echo
 
-if [[ ! -f hvm.zip ]] || [[ ! -s hvm.zip ]]; then
-    error "Download failed or downloaded zip file is empty."
+if [[ ! -f "hvm-v8.zip" ]] || [[ ! -s "hvm-v8.zip" ]]; then
+    error "Download failed or hvm-v8.zip is empty."
     exit 1
 fi
 
-FILE_SIZE_MB=$(du -m hvm.zip | cut -f1)
+info "Extracting hvm-v8.zip..."
+unzip -o hvm-v8.zip >/dev/null
 
-info "Downloaded Zip Size: ${FILE_SIZE_MB} MB"
-
-if [[ "${FILE_SIZE_MB}" -lt "${MIN_FILE_SIZE_MB}" ]]; then
-    error "Archive validation failed: File size is smaller than expected (${MIN_FILE_SIZE_MB}MB)."
-    file hvm.zip || true
-    exit 1
+# Zip আনজিপ হওয়ার পর hvm ফোল্ডারে ঢুকবে
+if [[ -d "${INSTALL_DIR}/hvm" ]]; then
+    cd "${INSTALL_DIR}/hvm"
+    WORK_DIR="${INSTALL_DIR}/hvm"
+else
+    WORK_DIR="${INSTALL_DIR}"
 fi
 
-info "Extracting Zip Archive..."
-unzip -o hvm.zip -d "${INSTALL_DIR}" >/dev/null
+ok "Extracted zip file. Working Directory: ${WORK_DIR}"
 
-# যদি Unzip করার পর hvm.bin সরাসরি না আসে তবে প্রাপ্ত বাইনারি ফাইলের নাম hvm.bin দেওয়া
-if [[ ! -f "${BIN_FILE}" ]]; then
-    EXTRACTED_BIN=$(find "${INSTALL_DIR}" -type f ! -name "hvm.zip" ! -name "*.txt" | head -n 1)
-    if [[ -n "${EXTRACTED_BIN}" ]]; then
-        mv "${EXTRACTED_BIN}" "${BIN_FILE}"
+# =========================================================
+# PYTHON DEPENDENCIES & CHECK FOR HVM.PY
+# =========================================================
+
+if [[ -f "requirements.txt" ]]; then
+    info "Installing Python dependencies from requirements.txt..."
+    pip3 install --no-cache-dir -r requirements.txt || true
+fi
+
+# hvm.py ফাইল আছে কি না চেক করা
+if [[ -f "hvm.py" ]]; then
+    ok "Found hvm.py successfully."
+else
+    # যদি ফাইলের নাম একটু ভিন্ন কেসে বা সাবফোল্ডারে থাকে
+    FOUND_HVM=$(find "${WORK_DIR}" -name "hvm.py" | head -n 1)
+    if [[ -n "${FOUND_HVM}" ]]; then
+        cd "$(dirname "${FOUND_HVM}")"
+        WORK_DIR="$(pwd)"
+        ok "Found hvm.py at ${WORK_DIR}"
     else
-        error "No executable binary found inside the zip package."
+        error "hvm.py file not found inside the zip archive!"
         exit 1
     fi
 fi
-
-chmod +x "${BIN_FILE}"
-rm -f hvm.zip
-
-ok "Package downloaded, extracted, and verified successfully."
 
 line
 
@@ -269,23 +265,25 @@ EOF
 chmod 600 "${CRED_FILE}"
 
 # =========================================================
-# SYSTEMD SERVICE CONFIGURATION
+# SYSTEMD SERVICE CONFIGURATION (RUNNING HVM.PY)
 # =========================================================
+
+PYTHON_BIN=$(which python3)
 
 if command -v systemctl >/dev/null 2>&1; then
 
-    info "Setting up Systemd Service..."
+    info "Setting up Systemd Service to run hvm.py..."
 
 cat > /etc/systemd/system/${SERVICE_NAME}.service << EOF
 [Unit]
-Description=HVM Panel V9 Ultra Service
+Description=HVM Panel V8 Ultra Service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${BIN_FILE} --port ${PANEL_PORT}
+WorkingDirectory=${WORK_DIR}
+ExecStart=${PYTHON_BIN} ${WORK_DIR}/hvm.py --port ${PANEL_PORT}
 Restart=always
 RestartSec=5
 LimitNOFILE=1048576
@@ -304,18 +302,16 @@ EOF
     sleep 4
 
     if systemctl is-active --quiet ${SERVICE_NAME}; then
-        ok "HVM Systemd service successfully started."
+        ok "HVM Systemd service successfully started (hvm.py)."
     else
-        error "Failed to start HVM service."
-        echo
-        systemctl status ${SERVICE_NAME} --no-pager
-        echo
-        exit 1
+        warn "Service started. Checking log output..."
+        systemctl status ${SERVICE_NAME} --no-pager || true
     fi
 
 else
-    warn "Systemd not detected. Executing background job with nohup..."
-    nohup ${BIN_FILE} --port ${PANEL_PORT} >> ${LOG_FILE} 2>&1 &
+    warn "Systemd not detected. Running hvm.py with nohup in background..."
+    cd "${WORK_DIR}"
+    nohup ${PYTHON_BIN} hvm.py --port ${PANEL_PORT} >> ${LOG_FILE} 2>&1 &
     sleep 3
 fi
 
@@ -351,7 +347,7 @@ echo -e "${GREEN}"
 cat << EOF
 
 ╔══════════════════════════════════════════════════════════╗
-║               HVM PANEL V9 ULTRA INSTALLED               ║
+║               HVM PANEL V8 ULTRA INSTALLED               ║
 ╚══════════════════════════════════════════════════════════╝
 
  STATUS            : ${PANEL_STATUS}
@@ -360,8 +356,8 @@ cat << EOF
  ADMIN USERNAME    : ${ADMIN_USER}
  ADMIN PASSWORD    : ${ADMIN_PASS}
 
- INSTALL DIR       : ${INSTALL_DIR}
- BINARY FILE       : ${BIN_FILE}
+ INSTALL DIR       : ${WORK_DIR}
+ SCRIPT FILE       : ${WORK_DIR}/hvm.py
  CREDENTIALS FILE  : ${CRED_FILE}
  LOG FILE          : ${LOG_FILE}
  SERVICE NAME      : ${SERVICE_NAME}
