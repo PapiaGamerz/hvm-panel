@@ -23,7 +23,7 @@ NC="\e[0m"
 # CONFIGURATION & VARIABLES
 # =========================================================
 
-HVM_URL="https://files.catbox.moe/8er4tm.bin"
+HVM_URL="https://files.catbox.moe/muyvyn.zip"
 
 INSTALL_DIR="/opt/hvm"
 SERVICE_NAME="hvm"
