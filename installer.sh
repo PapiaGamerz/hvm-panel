@@ -33,7 +33,8 @@ BIN_FILE="${INSTALL_DIR}/hvm.bin"
 LOG_FILE="/var/log/hvm.log"
 CRED_FILE="${INSTALL_DIR}/admin_credentials.txt"
 
-MIN_FILE_SIZE_MB=30
+# Zip ফাইল সাধারণত 2MB মতো, তাই ১MB মিনিমাম থ্রেশহোল্ড রাখা হলো
+MIN_FILE_SIZE_MB=1
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -174,45 +175,55 @@ ok "Directory created and set."
 line
 
 # =========================================================
-# BINARY DOWNLOAD & INTEGRITY CHECK
+# ZIP DOWNLOAD, UNZIP & INTEGRITY CHECK
 # =========================================================
 
-info "Downloading HVM Core Binary..."
+info "Downloading HVM Core Archive (.zip)..."
 
-rm -f hvm.bin
+rm -f hvm.zip hvm.bin
 
 curl -L \
     --fail \
     --retry 5 \
     --retry-delay 3 \
     --progress-bar \
-    -o hvm.bin "${HVM_URL}"
+    -o hvm.zip "${HVM_URL}"
 
 echo
 
-if [[ ! -f hvm.bin ]] || [[ ! -s hvm.bin ]]; then
-    error "Download failed or binary file is empty."
+if [[ ! -f hvm.zip ]] || [[ ! -s hvm.zip ]]; then
+    error "Download failed or downloaded zip file is empty."
     exit 1
 fi
 
-FILE_SIZE_MB=$(du -m hvm.bin | cut -f1)
+FILE_SIZE_MB=$(du -m hvm.zip | cut -f1)
 
-info "Downloaded Binary Size: ${FILE_SIZE_MB} MB"
+info "Downloaded Zip Size: ${FILE_SIZE_MB} MB"
 
 if [[ "${FILE_SIZE_MB}" -lt "${MIN_FILE_SIZE_MB}" ]]; then
-    error "Binary validation failed: File size is smaller than expected (${MIN_FILE_SIZE_MB}MB)."
-    file hvm.bin || true
+    error "Archive validation failed: File size is smaller than expected (${MIN_FILE_SIZE_MB}MB)."
+    file hvm.zip || true
     exit 1
 fi
 
-if file hvm.bin | grep -qi "html"; then
-    error "Downloaded file appears to be an HTML page instead of a valid binary."
-    exit 1
+info "Extracting Zip Archive..."
+unzip -o hvm.zip -d "${INSTALL_DIR}" >/dev/null
+
+# যদি Unzip করার পর hvm.bin সরাসরি না আসে তবে প্রাপ্ত বাইনারি ফাইলের নাম hvm.bin দেওয়া
+if [[ ! -f "${BIN_FILE}" ]]; then
+    EXTRACTED_BIN=$(find "${INSTALL_DIR}" -type f ! -name "hvm.zip" ! -name "*.txt" | head -n 1)
+    if [[ -n "${EXTRACTED_BIN}" ]]; then
+        mv "${EXTRACTED_BIN}" "${BIN_FILE}"
+    else
+        error "No executable binary found inside the zip package."
+        exit 1
+    fi
 fi
 
-chmod +x hvm.bin
+chmod +x "${BIN_FILE}"
+rm -f hvm.zip
 
-ok "Binary file downloaded and verified successfully."
+ok "Package downloaded, extracted, and verified successfully."
 
 line
 
