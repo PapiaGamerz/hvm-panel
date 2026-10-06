@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =========================================================
-# HVM PANEL V9 ULTRA INSTALLER
+# HVM PANEL V8 ULTRA INSTALLER
 # =========================================================
 
 set -euo pipefail
